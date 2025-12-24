@@ -6,6 +6,9 @@ DWPose Extended - Данные и константы
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Set
 from enum import Enum
+import torch
+import numpy as np
+from einops import rearrange
 
 # =============================================================================
 # КОНСТАНТЫ МОДЕЛЕЙ
@@ -671,4 +674,89 @@ LIMB_CHAINS = {
     "arm_R": ["Clavicle_R", "Shoulder_R", "Forearm_R", "Hand_R"],
     "leg_L": ["Thigh_L", "Calf_L", "Foot_L"],
     "leg_R": ["Thigh_R", "Calf_R", "Foot_R"],
+
 }
+
+"""
+Базовый класс для работы с 3D данными (нормали, глубина, контуры)
+Содержит проверенные методы получения и вывода данных
+"""
+
+class DWPose3DData:
+    """Базовый класс для работы с 3D данными"""
+    
+    @staticmethod
+    def get_depth_data(depth_map):
+        """Получение данных глубины"""
+        if isinstance(depth_map, torch.Tensor):
+            depth_np = depth_map.cpu().numpy()
+        else:
+            depth_np = depth_map
+            
+        # Нормализация глубины
+        if depth_np.max() > 0:
+            depth_normalized = (depth_np - depth_np.min()) / (depth_np.max() - depth_np.min())
+        else:
+            depth_normalized = depth_np
+            
+        return depth_normalized
+    
+    @staticmethod
+    def get_normal_data(normal_map):
+        """Получение данных нормалей"""
+        if isinstance(normal_map, torch.Tensor):
+            normal_np = normal_map.cpu().numpy()
+        else:
+            normal_np = normal_map
+            
+        # Нормализация нормалей [-1, 1] -> [0, 1]
+        normal_normalized = (normal_np + 1.0) / 2.0
+        return np.clip(normal_normalized, 0, 1)
+    
+    @staticmethod
+    def get_edge_data(edge_map):
+        """Получение данных контуров"""
+        if isinstance(edge_map, torch.Tensor):
+            edge_np = edge_map.cpu().numpy()
+        else:
+            edge_np = edge_map
+            
+        # Бинаризация контуров
+        if edge_np.max() > 1:
+            edge_np = edge_np / 255.0
+            
+        return edge_np
+    
+    @staticmethod
+    def prepare_output(data, channels=3):
+        """
+        Подготовка данных для вывода
+        Args:
+            data: numpy array данных
+            channels: количество каналов (1 или 3)
+        Returns:
+            torch.Tensor в формате ComfyUI [B, H, W, C]
+        """
+        # Убедимся что данные в правильном диапазоне
+        data = np.clip(data, 0, 1)
+        
+        # Приведение к нужному количеству каналов
+        if data.ndim == 2:  # [H, W]
+            if channels == 3:
+                data = np.stack([data] * 3, axis=-1)  # [H, W, 3]
+            else:
+                data = data[..., None]  # [H, W, 1]
+        elif data.ndim == 3:
+            if data.shape[-1] == 1 and channels == 3:
+                data = np.repeat(data, 3, axis=-1)
+            elif data.shape[-1] == 3 and channels == 1:
+                data = data.mean(axis=-1, keepdims=True)
+        
+        # Добавляем batch dimension если нужно
+        if data.ndim == 3:
+            data = data[None, ...]  # [1, H, W, C]
+        
+        # Конвертируем в torch tensor
+        output = torch.from_numpy(data.astype(np.float32))
+        
+        return output
