@@ -1,17 +1,94 @@
 """
-DWPose Extended - Функции и классы
-Этот файл содержит всю логику обработки
+Функции обработки 3D данных
+Наследуется от DWPose3DData и добавляет функции обработки
 """
 
-from __future__ import annotations
+import cv2
+import numpy as np
+import torch
 import math
 from typing import Dict, List, Optional, Tuple, Set, Any
+from .dwpose_3dData import DWPose3DData
+from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 
-import numpy as np
-import cv2
-import torch
+class DWPose3DFunctions(DWPose3DData):
+    """Класс с функциями обработки 3D данных"""
+    
+    @staticmethod
+    def apply_depth_colormap(depth_data, colormap=cv2.COLORMAP_INFERNO):
+        """Применение цветовой карты к данным глубины"""
+        depth_uint8 = (depth_data * 255).astype(np.uint8)
+        colored = cv2.applyColorMap(depth_uint8, colormap)
+        return cv2.cvtColor(colored, cv2.COLOR_BGR2RGB) / 255.0
+    
+    @staticmethod
+    def enhance_edges(edge_data, kernel_size=3, iterations=1):
+        """Усиление контуров"""
+        edge_uint8 = (edge_data * 255).astype(np.uint8)
+        
+        # Морфологические операции
+        kernel = np.ones((kernel_size, kernel_size), np.uint8)
+        enhanced = cv2.dilate(edge_uint8, kernel, iterations=iterations)
+        
+        return enhanced / 255.0
+    
+    @staticmethod
+    def blend_maps(map1, map2, alpha=0.5):
+        """Смешивание двух карт"""
+        return map1 * alpha + map2 * (1 - alpha)
+    
+    @staticmethod
+    def resize_map(data, target_size):
+        """Изменение размера карты"""
+        if isinstance(target_size, (list, tuple)) and len(target_size) == 2:
+            h, w = target_size
+        else:
+            h = w = target_size
+            
+        return cv2.resize(data, (w, h), interpolation=cv2.INTER_LINEAR)
+    
+    @staticmethod
+    def normalize_depth(depth_data, min_val=None, max_val=None):
+        """
+        Нормализация глубины с возможностью задать диапазон
+        """
+        if min_val is None:
+            min_val = depth_data.min()
+        if max_val is None:
+            max_val = depth_data.max()
+            
+        if max_val > min_val:
+            normalized = (depth_data - min_val) / (max_val - min_val)
+        else:
+            normalized = np.zeros_like(depth_data)
+            
+        return np.clip(normalized, 0, 1)
+    
+    @staticmethod
+    def compute_gradient_magnitude(data):
+        """Вычисление градиента (для выделения границ)"""
+        # Градиенты по x и y
+        grad_x = cv2.Sobel(data, cv2.CV_64F, 1, 0, ksize=3)
+        grad_y = cv2.Sobel(data, cv2.CV_64F, 0, 1, ksize=3)
+        
+        # Магнитуда градиента
+        magnitude = np.sqrt(grad_x**2 + grad_y**2)
+        
+        # Нормализация
+        if magnitude.max() > 0:
+            magnitude = magnitude / magnitude.max()
+            
+        return magnitude
+    
+    @staticmethod
+    def apply_bilateral_filter(data, d=9, sigma_color=75, sigma_space=75):
+        """Билатеральный фильтр (сглаживание с сохранением границ)"""
+        data_uint8 = (data * 255).astype(np.uint8)
+        filtered = cv2.bilateralFilter(data_uint8, d, sigma_color, sigma_space)
+        return filtered / 255.0
+
 
 from .dwpose_3dData import (
     BONE_DEFINITIONS,
@@ -1220,4 +1297,5 @@ class FingerGenerator:
     def generate_toes(
         foot_pos: Tuple[float, float, float, float],
         side: str,
+
         enabled_toes: Set[
